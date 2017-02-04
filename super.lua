@@ -3,85 +3,167 @@ local eventtap = hs.eventtap
 local eventTypes = hs.eventtap.event.types
 
 -- Colemak remappings
-local simKeyA = 's'
-local simKeyB = 'r'
+local simKeyA = 'r'
+local simKeyB = 's'
 
 -- If simKeyA and simKeyB are *both* pressed within this time period, consider this to
 -- mean that they've been pressed simultaneously, and therefore we should enter
 -- Super Duper Mode.
-local MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES = 0.02 -- 20 milliseconds
+local MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES = 00.02 -- 20 milliseconds
 
 local superDuperMode = {
   reset = function(self)
     self.active = false
-    self.isSDown = false
-    self.isDDown = false
-    self.ignoreNextS = false
-    self.ignoreNextD = false
+    self.disableActivationKeys = false
+    self.wait = false
+    self.allowNextAKey = false
+    self.allowNextBKey = false
     self.modifiers = {}
   end,
+
+  bothUp = function(self)
+    return not self.isKeyADown and not self.isKeyBDown
+  end,
+
+  bothDown = function(self)
+    return self.isKeyADown and self.isKeyBDown
+  end,
+
+  delay = function(self)
+    self.wait = true
+    hs.timer.doAfter(MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES, function()
+      self.wait = false
+    end)
+  end
 }
+superDuperMode.isKeyADown = false
+superDuperMode.isKeyBDown = false
 superDuperMode:reset()
 
 superDuperModeActivationListener = eventtap.new({ eventTypes.keyDown }, function(event)
   -- If simKeyA or simKeyB is pressed in conjuction with any modifier keys
+  -- but not together
   -- (e.g., command+simKeyA), then we're not activating Super Duper Mode.
-  if not (next(event:getFlags()) == nil) then
+  if not superDuperMode:bothDown() and not (next(event:getFlags()) == nil) then
     return false
   end
 
-  local characters = event:getCharacters()
+  local characters = event:getCharacters(true):lower()
 
   if characters == simKeyA then
-    if superDuperMode.ignoreNextS then
-      superDuperMode.ignoreNextS = false
-      return false
-    end
     -- Temporarily suppress this simKeyA keystroke. At this point, we're not sure if
     -- the user intends to type an simKeyA, or if the user is attempting to activate
     -- Super Duper Mode. If simKeyB is pressed by the time the following function
     -- executes, then activate Super Duper Mode. Otherwise, trigger an ordinary
     -- simKeyA keystroke.
-    superDuperMode.isSDown = true
+
+    -- log.d('--r--')
+    superDuperMode.isKeyADown = true
+
+    if superDuperMode.disableActivationKeys then
+      -- log.d('disabled')
+      superDuperMode.allowNextAKey = false
+      return true
+    end
+
+    if superDuperMode.wait then
+      -- log.d('wait')
+      superDuperMode.allowNextAKey = false
+      return true
+    end
+
+    if superDuperMode.allowNextAKey then
+      -- log.d('allow')
+      superDuperMode.allowNextAKey = false
+      return false
+    end
+
     hs.timer.doAfter(MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES, function()
-      if superDuperMode.isDDown then
+      -- log.d('yo')
+      if superDuperMode.isKeyBDown then
+        -- log.d('delay:activate')
         superDuperMode.active = true
-      else
-        superDuperMode.ignoreNextS = true
+      elseif not superDuperMode.wait and not superDuperMode.active then
+        -- log.d('delay:not')
+        superDuperMode.allowNextAKey = true
         keyUpDown({}, simKeyA)
-        return false
       end
+      return true
     end)
     return true
   elseif characters == simKeyB then
-    if superDuperMode.ignoreNextD then
-      superDuperMode.ignoreNextD = false
-      return false
-    end
+
+    -- log.d('--s--')
+
     -- Temporarily suppress this simKeyB keystroke. At this point, we're not sure if
     -- the user intends to type a simKeyB, or if the user is attempting to activate
     -- Super Duper Mode. If simKeyA is pressed by the time the following function
     -- executes, then activate Super Duper Mode. Otherwise, trigger an ordinary
     -- simKeyB keystroke.
-    superDuperMode.isDDown = true
+
+    superDuperMode.isKeyBDown = true
+
+    if superDuperMode.disableActivationKeys then
+      superDuperMode.allowNextBKey = false
+      return true
+    end
+
+    if superDuperMode.wait then
+      -- log.d('wait')
+      superDuperMode.allowNextBKey = false
+      return true
+    end
+
+    if superDuperMode.allowNextBKey then
+      -- log.d('allow')
+      superDuperMode.allowNextBKey = false
+      return false
+    end
+
     hs.timer.doAfter(MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES, function()
-      if superDuperMode.isSDown then
+      if superDuperMode.isKeyADown then
+        -- log.d('delay:activate')
         superDuperMode.active = true
-      else
-        superDuperMode.ignoreNextD = true
+      elseif not superDuperMode.wait and not superDuperMode.active then
+        -- log.d('delay:not')
+        superDuperMode.allowNextBKey = true
         keyUpDown({}, simKeyB)
-        return false
       end
+      return true
     end)
     return true
   end
 end):start()
 
 superDuperModeDeactivationListener = eventtap.new({ eventTypes.keyUp }, function(event)
-  local characters = event:getCharacters()
-  if characters == simKeyA or characters == simKeyB then
-    superDuperMode:reset()
+  local characters = event:getCharacters(true):lower()
+
+  -- track state of activation keys
+  if characters == simKeyA then
+    -- log.d('r up')
+    superDuperMode.isKeyADown = false
   end
+
+  if characters == simKeyB then
+    -- log.d('s up')
+    superDuperMode.isKeyBDown = false
+  end
+
+  -- if either key is been released, reset super duper mode
+  -- disable the use of the activation keys
+  if (superDuperMode.active and (characters == simKeyA or characters == simKeyB)) then
+    superDuperMode:reset()
+    -- log.d('disable')
+    superDuperMode.disableActivationKeys = true
+  end
+
+  -- if both keys have been released, do not re-enable activation keys
+  if not superDuperMode.wait and superDuperMode.disableActivationKeys and superDuperMode:bothUp() then
+     superDuperMode.disableActivationKeys = false
+     superDuperMode:delay()
+     -- log.d('enable')
+  end
+
 end):start()
 
 --------------------------------------------------------------------------------
@@ -122,9 +204,10 @@ superDuperModeNavListener = eventtap.new({ eventTypes.keyDown }, function(event)
     n = 'down',
     e = 'up',
     i = 'right',
+    d = 'forwarddelete'
   }
 
-  local keystroke = charactersToKeystrokes[event:getCharacters(true).lower()]
+  local keystroke = charactersToKeystrokes[event:getCharacters(true):lower():lower()]
   if keystroke then
     local modifiers = {}
     n = 0
