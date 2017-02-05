@@ -38,10 +38,13 @@ local MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES = 00.02 -- 20 milliseconds
 ------------------------------
 
 local keysDown = {}
+-- NOTE: need to keep track of which keys were pressed only within the delay
+-- This allows sequential press and hold to type normal characters
+local quickKeysDown = {}
 local once = false
--- NOTE: active is different than bothDown() since both keys could be down from non-simultaneous (sequential press and hold) key presses
+-- NOTE: active is different than just having both keys down, since that can happen from non-simultaneous (sequential press and hold) key presses
 local active = false
-local disableActivationKeys = false
+local cooldown = false
 local modifiers = {}
 
 ------------------------------
@@ -63,14 +66,6 @@ end
 
 local isKeyDown = function(char)
   return keysDown[char]
-end
-
-local bothUp = function()
-  return not keysDown[KEY1] and not keysDown[KEY2]
-end
-
-local bothDown = function()
-  return keysDown[KEY1] and keysDown[KEY2]
 end
 
 local other = function(char)
@@ -104,16 +99,13 @@ superDuperModeActivationListener = hs.eventtap.new({ eventTypes.keyDown }, funct
   if isActivationKey(char) then
 
     -- log.d('--' .. char .. '--')
-    -- if active then
-    --   log.d('active')
-    -- end
     keysDown[char] = true
 
     local onceComplete = once
     once = false
 
     -- prevent held key presses to be typed when exiting smode
-    if disableActivationKeys then
+    if cooldown then
       -- log.d('disabled')
       return true
     end
@@ -129,11 +121,13 @@ superDuperModeActivationListener = hs.eventtap.new({ eventTypes.keyDown }, funct
     -- executes, then activate smode. Otherwise, trigger an ordinary
     -- activation key keystroke.
     if not active then
+      quickKeysDown[char] = true
+      -- log.d('delay')
       hs.timer.doAfter(MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES, function()
-        if isKeyDown(other(char)) then
+        quickKeysDown[char] = false
+        if quickKeysDown[other(char)] then
           -- log.d('delay:activate')
           active = true
-        -- TODO: Is wait redundant?
         elseif not active then
           -- log.d('delay:not')
           once = true
@@ -141,6 +135,7 @@ superDuperModeActivationListener = hs.eventtap.new({ eventTypes.keyDown }, funct
         end
       end)
     end
+
     return true
   end
 end):start()
@@ -158,14 +153,14 @@ superDuperModeDeactivationListener = hs.eventtap.new({ eventTypes.keyUp }, funct
     if active then
       -- log.d('disable')
       active = false
-      disableActivationKeys = true
+      cooldown = true
     end
 
     -- if both keys have been released, re-enable activation keys after a delay
-    if disableActivationKeys and bothUp() then
+    if cooldown and not isKeyDown(KEY1) and not isKeyDown(KEY2) then
       delay(function()
         -- log.d('enable')
-        disableActivationKeys = false
+        cooldown = false
       end)
     end
   end
