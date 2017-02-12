@@ -9,9 +9,7 @@ Ad hoc testing guidelines:
   - enter and exit smode and then press single activation key -> should type character
   - once activated, release one and then the other without releasing both -> should stay in smode
   - press and hold one activation key, then press and hold the other -> should type characters
-
-Todo:
-  - press gs<enter> too fast and the s gets delayed until after the enter
+  - press gs<enter> within MAX_TIME -> enter gets delayed until after 's'
 
 --]]
 
@@ -37,6 +35,7 @@ local mappings = {
 -- mean that they've been pressed simultaneously, and therefore we should enter
 -- smode.
 local MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES = 00.02 -- 20 milliseconds
+-- local MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES = 0.4 -- DEBUG
 
 ------------------------------
 -- State
@@ -51,6 +50,7 @@ local once = false
 local active = false
 local cooldown = false
 local modifiers = {}
+local delayedKeys = {}
 
 ------------------------------
 -- Helper Functions
@@ -89,10 +89,17 @@ local keys = function(table)
 end
 
 local printTable = function(table)
+  print(table)
   for k, v in pairs(table) do
-    print(k, v)
+    print('  ', k, v)
   end
   print('')
+end
+
+local clearTable = function(table)
+  for k in pairs(table) do
+    table[k] = nil
+  end
 end
 
 -- finds a mapping for the given key + modifiers if it exists
@@ -104,6 +111,10 @@ local findMapping = function(key, modifiers)
     end
   end
   return nil
+end
+
+local sendKeyDown = function(modifiers, key)
+  hs.eventtap.event.newKeyEvent(modifiers, key, true):post()
 end
 
 -- http://stackoverflow.com/questions/25922437/how-can-i-deep-compare-2-lua-tables-which-may-or-may-not-have-tables-as-keys
@@ -184,7 +195,7 @@ superDuperModeActivationListener = hs.eventtap.new({ eventTypes.keyDown }, funct
     end
 
     if onceComplete then
-      -- log.d('once')
+      -- print('complete', char)
       return false
     end
 
@@ -205,9 +216,23 @@ superDuperModeActivationListener = hs.eventtap.new({ eventTypes.keyDown }, funct
           -- log.d('delay:not')
           once = true
           sendKeyDown({}, char)
+          for i,key in pairs(delayedKeys) do
+            -- print('SENDING', key)
+            once = true
+            -- sendKeyDown({}, key)
+            hs.eventtap.keyStroke({}, key)
+          end
+          clearTable(delayedKeys)
         end
       end)
     end
+
+    return true
+  elseif quickKeysDown[KEY1] or quickKeysDown[KEY2] then
+
+    -- queue the key to be inserted after the delay
+    table.insert(delayedKeys, event:getKeyCode())
+    -- print('DELAY', event:getKeyCode())
 
     return true
   end
