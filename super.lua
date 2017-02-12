@@ -18,8 +18,8 @@ Ad hoc testing guidelines:
 ------------------------------
 
 -- Colemak remappings
-local KEY1 = 'r'
-local KEY2 = 's'
+local KEY1 = hs.keycodes.map[1] -- the physical 's' key, independent of keyboard layout
+local KEY2 = hs.keycodes.map[2] -- the physical 's' key, independent of keyboard layout
 
 local mappings = {
   { from = 'h', to = 'left' },
