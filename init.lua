@@ -11,15 +11,18 @@ Ad hoc testing guidelines:
   - press and hold one activation key, then press and hold the other -> should type characters
   - press gs<enter> within MAX_TIME -> enter gets delayed until after 's'
 
+Hammerspoon Console Tips:
+  - hs.reload()
+
 --]]
 
-------------------------------
+---------------------------------------------------------------
 -- Constants
-------------------------------
+---------------------------------------------------------------
 
 -- Colemak remappings
 local KEY1 = hs.keycodes.map[1] -- the physical 's' key, independent of keyboard layout
-local KEY2 = hs.keycodes.map[2] -- the physical 's' key, independent of keyboard layout
+local KEY2 = hs.keycodes.map[2] -- the physical 'r' key, independent of keyboard layout
 
 local mappings = {
   { from = 'h', to = 'left' },
@@ -34,45 +37,45 @@ local mappings = {
 -- If KEY1 and KEY2 are *both* pressed within this time period, consider this to
 -- mean that they've been pressed simultaneously, and therefore we should enter
 -- smode.
-local MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES = 00.02 -- 20 milliseconds
--- local MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES = 0.4 -- DEBUG
+local ACTIVATION_WINDOW = 0.04 -- 40 milliseconds
+local COOLDOWN_TIME = 0.02
 
-------------------------------
+---------------------------------------------------------------
 -- State
-------------------------------
+---------------------------------------------------------------
 
 local keysDown = {}
--- NOTE: need to keep track of which keys were pressed only within the delay
--- This allows sequential press and hold to type normal characters
-local quickKeysDown = {}
-local once = false
 -- NOTE: active is different than just having both keys down, since that can happen from non-simultaneous (sequential press and hold) key presses
 local active = false
-local cooldown = false
-local modifiers = {}
-local delayedKeys = {}
 
-------------------------------
+local pending = false
+local pendingKey = nil
+local pendingModifiers = {}
+local pendingNonce = 0
+
+local cooldown = false
+local cooldownNonce = 0
+
+-- used to force a normal key press
+local force = false
+
+---------------------------------------------------------------
 -- Helper Functions
-------------------------------
+---------------------------------------------------------------
 
 local eventTypes = hs.eventtap.event.types
 
--- delay a function and suspend smode during the delay
-local delay = function(f)
-  hs.timer.doAfter(MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES, function()
-    f()
-  end)
-end
-
+-- return true if the given key is one of the activation keys
 local isActivationKey = function(char)
   return char == KEY1 or char == KEY2
 end
 
+-- return true if the given key is pressed
 local isKeyDown = function(char)
   return keysDown[char]
 end
 
+-- return the opposite of the given activation key
 local other = function(char)
   return char == KEY1 and KEY2 or KEY1
 end
@@ -88,20 +91,6 @@ local keys = function(table)
   return list
 end
 
-local printTable = function(table)
-  print(table)
-  for k, v in pairs(table) do
-    print('  ', k, v)
-  end
-  print('')
-end
-
-local clearTable = function(table)
-  for k in pairs(table) do
-    table[k] = nil
-  end
-end
-
 -- finds a mapping for the given key + modifiers if it exists
 local findMapping = function(key, modifiers)
   local n = 0
@@ -113,8 +102,24 @@ local findMapping = function(key, modifiers)
   return nil
 end
 
-local sendKeyDown = function(modifiers, key)
+-- send a raw key event
+local sendKeyDown = function(key, modifiers)
+  -- force the key through as a normal key press
+  force = true
   hs.eventtap.event.newKeyEvent(modifiers, key, true):post()
+end
+
+-- send a mapped a key event or if there is no mapping return false
+local sendMappedKeyDown = function(key, modifiers)
+
+  local mapping = findMapping(key, modifiers)
+  if mapping then
+    -- if toMod is not specified, pass whatever modifiers are pressed
+    -- print('SENDING mapping', mapping.to)
+    sendKeyDown(mapping.to, mapping.toMod or modifiers)
+    return true
+  end
+
 end
 
 -- http://stackoverflow.com/questions/25922437/how-can-i-deep-compare-2-lua-tables-which-may-or-may-not-have-tables-as-keys
@@ -165,119 +170,162 @@ function table_eq(table1, table2)
    return recurse(table1, table2)
 end
 
+-- resolve the pending mode and optionally send the pending key
+local resolvePending = function(send)
+  -- print('RESOLVE PENDING', send)
+  pending = false
+  -- increment the pendingNonce to invalidate the existing window
+  pendingNonce = pendingNonce + 1
+  if send then
+    sendKeyDown(pendingKey, pendingModifiers)
+  end
+end
 
-------------------------------
+
+---------------------------------------------------------------
 -- Event Listeners
-------------------------------
+---------------------------------------------------------------
 
-superDuperModeActivationListener = hs.eventtap.new({ eventTypes.keyDown }, function(event)
+-- keyDown
+hs.eventtap.new({ eventTypes.keyDown }, function(event)
   -- If KEY1 or KEY2 is pressed in conjuction with any modifier keys
   -- but not together
   -- (e.g., command+KEY1), then we're not activating smode.
-  if not active and not (next(event:getFlags()) == nil) then
+  -- if not active and not (next(event:getFlags()) == nil) then
+  --   -- print('NON-MODIFIER')
+  --   return false
+  -- end
+
+  -- read char
+  local char = event:getCharacters(true):lower()
+  if char == ' ' then
+    char = 'space'
+  end
+  -- print('--' .. char .. '--')
+
+  -- allow key presses to be forced through
+  if force then
+    -- print('FORCE')
+    force = false
     return false
   end
 
-  local char = event:getCharacters(true):lower()
-
-  if isActivationKey(char) then
-
-    -- log.d('--' .. char .. '--')
+  -- first activation key
+  if isActivationKey(char) and not active and not pending then
+    -- print('FIRST ACTIVATION KEY')
     keysDown[char] = true
+    pending = true
+    pendingKey = char
+    pendingModifiers = keys(event:getFlags())
 
-    local onceComplete = once
-    once = false
+    -- start activation window
+    -- use a nonce so the callback can be invalidated manually
+    pendingNonce = pendingNonce + 1
+    local activationNonce = pendingNonce
+    hs.timer.doAfter(ACTIVATION_WINDOW, function()
+      if pendingNonce == activationNonce then
+        resolvePending(true)
+      else
+        -- print('DELAY SUPPRESSED: OLD NONCE')
+      end
+    end)
 
-    -- prevent held key presses to be typed when exiting smode
-    if cooldown then
-      -- log.d('disabled')
-      return true
-    end
-
-    if onceComplete then
-      -- print('complete', char)
-      return false
-    end
-
-    -- Temporarily suppress this activation key keystroke. At this point, we're not sure if
-    -- the user intends to type an activation key, or if the user is attempting to activate
-    -- smode. If the other key is pressed by the time the following function
-    -- executes, then activate smode. Otherwise, trigger an ordinary
-    -- activation key keystroke.
-    if not active then
-      quickKeysDown[char] = true
-      -- log.d('delay')
-      hs.timer.doAfter(MAX_TIME_BETWEEN_SIMULTANEOUS_KEY_PRESSES, function()
-        quickKeysDown[char] = false
-        if quickKeysDown[other(char)] then
-          -- log.d('delay:activate')
-          active = true
-        elseif not active then
-          -- log.d('delay:not')
-          once = true
-          sendKeyDown({}, char)
-          for i,key in pairs(delayedKeys) do
-            -- print('SENDING', key)
-            once = true
-            -- sendKeyDown({}, key)
-            hs.eventtap.keyStroke({}, key)
-          end
-          clearTable(delayedKeys)
-        end
-      end)
-    end
-
-    return true
-  elseif quickKeysDown[KEY1] or quickKeysDown[KEY2] then
-
-    -- queue the key to be inserted after the delay
-    table.insert(delayedKeys, event:getKeyCode())
-    -- print('DELAY', event:getKeyCode())
-
+    -- suppress pending key
     return true
   end
+
+  -- any non-activation key will resolve pending
+  if pending and not isActivationKey(char) then
+    -- print('NON-ACTIVATION KEY')
+    resolvePending(true)
+    local isSpecial = not (next(event:getFlags()) == nil) or event:getKeyCode() == 53 or event:getKeyCode() == 51
+    -- async send the current key so that is pressed after the pending key
+    hs.timer.doAfter(0, function()
+      -- local modifier = next(event:getFlags()) == nil and {} or keys(event:getFlags())
+      -- if not a normal character, must use keystroke (slower)
+      if isSpecial then
+        -- print('RESOLVE PENDING SHORT CIRCUIT (SPECIAL KEY)')
+        force = true
+        hs.eventtap.keyStroke(keys(event:getFlags()), event:getKeyCode())
+      else
+        -- print('RESOLVE PENDING SHORT CIRCUIT (NORMAL KEY)', event:getKeyCode())
+        sendKeyDown(char, modifiers)
+      end
+    end)
+
+    -- return true (suppress) except for escape, which is represented by ''
+    return true
+  end
+
+  -- activate
+  if not active and pending and isKeyDown(other(char)) then
+    -- print('ACTIVATE!')
+    active = true
+    resolvePending(false)
+    return true
+  end
+
+  -- suppress activation keys when in smode
+  if active and isActivationKey(char) then
+    return true
+  end
+
+  -- during the cooldown period, ignore all activation keys
+  -- NOTE: must go below ACTIVATE
+  if cooldown and isActivationKey(char) then
+    cooldownNonce = cooldownNonce + 1
+    return true
+  end
+
 end):start()
 
-superDuperModeDeactivationListener = hs.eventtap.new({ eventTypes.keyUp }, function(event)
+-- keyUp
+hs.eventtap.new({ eventTypes.keyUp }, function(event)
 
   local char = event:getCharacters(true):lower()
 
   if isActivationKey(char) then
+    -- print('ACTIVATION KEY UP', char)
 
     keysDown[char] = false
+
+    -- resolve
+    if pending then
+      resolvePending(true)
+    end
 
     -- if either key has been released, reset smode
     -- disable the use of the activation keys until both keys are release
     if active then
-      -- log.d('disable')
+      -- print('  active')
       active = false
       cooldown = true
     end
 
-    -- if both keys have been released, re-enable activation keys after a delay
+    -- if both keys have been released, re-enable activation keys after the cooldown
     if cooldown and not isKeyDown(KEY1) and not isKeyDown(KEY2) then
-      delay(function()
-        -- log.d('enable')
-        cooldown = false
+      cooldownNonce = cooldownNonce + 1
+      local activationNonce = cooldownNonce
+      -- print('  cooldown release start', cooldownNonce)
+      hs.timer.doAfter(COOLDOWN_TIME, function()
+        if cooldownNonce == activationNonce then
+          -- print('  cooldown release end', cooldownNonce)
+          cooldown = false
+        else
+          -- print('  cooldown nonce old')
+        end
       end)
     end
   end
 
 end):start()
 
---------------------------------------------------------------------------------
+---------------------------------------------------------------
 -- Navigation
---------------------------------------------------------------------------------
+---------------------------------------------------------------
 
-superDuperModeNavListener = hs.eventtap.new({ eventTypes.keyDown }, function(event)
-  if not active then
-    return false
-  end
-
-  local mapping = findMapping(event:getCharacters(true):lower(), keys(event:getFlags()))
-  if mapping then
-    -- if toMod is not specified, pass whatever modifiers are pressed
-    sendKeyDown(mapping.toMod or keys(event:getFlags()), mapping.to)
-    return true
-  end
+-- keyDown
+-- (duplicate event handlers handled in LIFO order)
+hs.eventtap.new({ eventTypes.keyDown }, function(event)
+  return active and sendMappedKeyDown(event:getCharacters(true):lower(), keys(event:getFlags()))
 end):start()
