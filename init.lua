@@ -3,13 +3,15 @@
 Simultaneous VI Mode (smode)
 
 Ad hoc testing guidelines:
-  - press activation keys at same time -> should enter smode and enable navigation
-  - tap activate keys several times -> should enter and exit smode smoothly
-  - activate, hold, release one, hold, release other -> should exit smode smoothly
-  - enter and exit smode and then press single activation key -> should type character
-  - once activated, release one and then the other without releasing both -> should stay in smode
-  - press and hold one activation key, then press and hold the other -> should type characters
-  - press gs<enter> within MAX_TIME -> enter gets delayed until after 's'
+  ✓ press activation keys at same time -> should enter smode and enable navigation
+  ✓ tap activate keys several times -> should enter and exit smode smoothly
+  ✓ press and hold one activation key, then press and hold the other -> should type characters
+  ✓ enter and exit smode and then press single activation key -> should type character
+  ✓ press gs<enter> within MAX_TIME -> enter gets delayed until after 's'
+
+TODO:
+  ✗ activate, release one and then the other -> should exit smode without typing characters
+  ✗ activate, release one, re-activate, release other -> should enter and exit smode smoothly without typing characters.
 
 Hammerspoon Console Tips:
   - hs.reload()
@@ -48,11 +50,14 @@ local keysDown = {}
 -- NOTE: active is different than just having both keys down, since that can happen from non-simultaneous (sequential press and hold) key presses
 local active = false
 
+-- when an activation key is pressed, store the key in case the other key is not pressed
+-- then we can send the activation key as a normal key press
 local pending = false
 local pendingKey = nil
 local pendingModifiers = {}
 local pendingNonce = 0
 
+-- when smode
 local cooldown = false
 local cooldownNonce = 0
 
@@ -236,9 +241,12 @@ hs.eventtap.new({ eventTypes.keyDown }, function(event)
 
   -- any non-activation key will resolve pending
   if pending and not isActivationKey(char) then
-    -- print('NON-ACTIVATION KEY')
+    -- print('NON-ACTIVATION KEY', event:getKeyCode())
     resolvePending(true)
-    local isSpecial = not (next(event:getFlags()) == nil) or event:getKeyCode() == 53 or event:getKeyCode() == 51
+    local isSpecial = not (next(event:getFlags()) == nil)
+      or event:getKeyCode() == 36 -- enter
+      or event:getKeyCode() == 53 -- escape
+      or event:getKeyCode() == 51
     -- async send the current key so that is pressed after the pending key
     hs.timer.doAfter(0, function()
       -- local modifier = next(event:getFlags()) == nil and {} or keys(event:getFlags())
