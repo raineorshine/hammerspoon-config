@@ -10,8 +10,6 @@ Ad hoc testing guidelines:
   ✓ press gs<enter> within MAX_TIME -> enter gets delayed until after 's'
   ✓ activate, release one, re-activate, release other -> should enter and exit smode smoothly without typing characters.
 
-TODO:
-
 Hammerspoon Console Tips:
   - hs.reload()
 
@@ -21,7 +19,6 @@ Hammerspoon Console Tips:
 -- Constants
 ---------------------------------------------------------------
 
--- Colemak remappings
 local KEY1 = hs.keycodes.map[1] -- the physical 's' key, independent of keyboard layout
 local KEY2 = hs.keycodes.map[2] -- the physical 'r' key, independent of keyboard layout
 
@@ -117,7 +114,7 @@ local sendMappedKeyDown = function(key, modifiers)
   local mapping = findMapping(key, modifiers)
   if mapping then
     -- if toMod is not specified, pass whatever modifiers are pressed
-    -- print('SENDING mapping', mapping.to)
+    -- print('sending mapping', mapping.to)
     sendKeyDown(mapping.to, mapping.toMod or modifiers)
     return true
   end
@@ -174,7 +171,7 @@ end
 
 -- resolve the pending mode and optionally send the pending key
 local resolvePending = function(send)
-  -- print('RESOLVE PENDING', send)
+  -- print('resolve pending', send)
   pending = false
   -- increment the pendingNonce to invalidate the existing window
   pendingNonce = pendingNonce + 1
@@ -183,20 +180,15 @@ local resolvePending = function(send)
   end
 end
 
-
 ---------------------------------------------------------------
--- Event Listeners
+-- KeyDown
 ---------------------------------------------------------------
 
--- keyDown
 hs.eventtap.new({ eventTypes.keyDown }, function(event)
-  -- If KEY1 or KEY2 is pressed in conjuction with any modifier keys
-  -- but not together
-  -- (e.g., command+KEY1), then we're not activating smode.
-  -- if not active and not (next(event:getFlags()) == nil) then
-  --   -- print('NON-MODIFIER')
-  --   return false
-  -- end
+
+  ---------------------------------------------------------------
+  -- Setup
+  ---------------------------------------------------------------
 
   -- read char
   local char = event:getCharacters(true):lower()
@@ -207,19 +199,24 @@ hs.eventtap.new({ eventTypes.keyDown }, function(event)
 
   -- allow key presses to be forced through
   if force then
-    -- print('FORCE')
+    -- print('force')
     force = false
     return false
   end
 
   -- any activation key
-  if isActivationKey(char) then
+  local isAct = isActivationKey(char)
+  if isAct then
     keysDown[char] = true
   end
 
+  ---------------------------------------------------------------
+  -- Suppress and modify cases
+  ---------------------------------------------------------------
+
   -- first activation key
-  if isActivationKey(char) and not active and not pending then
-    -- print('FIRST ACTIVATION KEY')
+  if isAct and not active and not pending then
+    -- print('first activation key')
     pending = true
     pendingKey = char
     pendingModifiers = keys(event:getFlags())
@@ -229,65 +226,69 @@ hs.eventtap.new({ eventTypes.keyDown }, function(event)
     pendingNonce = pendingNonce + 1
     local activationNonce = pendingNonce
     hs.timer.doAfter(ACTIVATION_WINDOW, function()
+      -- print('activation window end')
       if pendingNonce == activationNonce then
+        -- print('  not supressed: valid nonce')
         resolvePending(true)
       else
-        -- print('DELAY SUPPRESSED: OLD NONCE')
+        -- print('  suppressed: old nonce')
       end
     end)
 
-    -- suppress pending key
-    return true
-  end
-
   -- any non-activation key will resolve pending
-  if pending and not isActivationKey(char) then
-    -- print('NON-ACTIVATION KEY', event:getKeyCode())
+  elseif pending and not isAct then
+    local keyCode = event:getKeyCode()
+    -- print('non-activation key', keyCode)
     resolvePending(true)
     local isSpecial = not (next(event:getFlags()) == nil)
-      or event:getKeyCode() == 36 -- enter
-      or event:getKeyCode() == 53 -- escape
-      or event:getKeyCode() == 51
+      or keyCode == 36 -- enter
+      or keyCode == 53 -- escape
+      or keyCode == 51 -- backspace
     -- async send the current key so that is pressed after the pending key
     hs.timer.doAfter(0, function()
       -- local modifier = next(event:getFlags()) == nil and {} or keys(event:getFlags())
       -- if not a normal character, must use keystroke (slower)
       if isSpecial then
-        -- print('RESOLVE PENDING SHORT CIRCUIT (SPECIAL KEY)')
+        -- print('resolve pending short circuit (special key)')
         force = true
-        hs.eventtap.keyStroke(keys(event:getFlags()), event:getKeyCode())
+        hs.eventtap.keyStroke(keys(event:getFlags()), keyCode)
       else
-        -- print('RESOLVE PENDING SHORT CIRCUIT (NORMAL KEY)', event:getKeyCode())
+        -- print('resolve pending short circuit (normal key)', keyCode)
         sendKeyDown(char, modifiers)
       end
     end)
 
-    -- return true (suppress) except for escape, which is represented by ''
-    return true
-  end
-
   -- activate
-  if not active and pending and isKeyDown(other(char)) then
-    -- print('ACTIVATE!')
+  elseif not active and pending and isKeyDown(other(char)) then
+    -- print('activate!')
     active = true
     resolvePending(false)
-    return true
-  end
 
   -- suppress activation keys when in smode
-  if active and isActivationKey(char) then
-    return true
+  elseif active and isAct then
+    -- leave empty so that we return true at the end
+
+  -- if none of the cases apply, we can return false for a normal key press
+  else
+    return false
   end
+
+  -- all code paths above suppress the key press
+  -- except for the explicit return false in the else case
+  return true
 
 end):start()
 
--- keyUp
+---------------------------------------------------------------
+-- KeyUp
+---------------------------------------------------------------
+
 hs.eventtap.new({ eventTypes.keyUp }, function(event)
 
   local char = event:getCharacters(true):lower()
 
   if isActivationKey(char) then
-    -- print('ACTIVATION KEY UP', char)
+    -- print('activation key up: resume pending', char)
 
     keysDown[char] = false
 
@@ -296,6 +297,7 @@ hs.eventtap.new({ eventTypes.keyUp }, function(event)
 
     -- if both keys have been released, re-enable activation keys
     if not isKeyDown(KEY1) and not isKeyDown(KEY2) then
+      -- print('  both keys up: exit smode')
       active = false
       resolvePending(false)
     end
