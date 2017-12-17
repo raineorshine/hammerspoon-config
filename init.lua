@@ -8,10 +8,9 @@ Ad hoc testing guidelines:
   ✓ press and hold one activation key, then press and hold the other -> should type characters
   ✓ enter and exit smode and then press single activation key -> should type character
   ✓ press gs<enter> within MAX_TIME -> enter gets delayed until after 's'
+  ✓ activate, release one, re-activate, release other -> should enter and exit smode smoothly without typing characters.
 
 TODO:
-  ✗ activate, release one and then the other -> should exit smode without typing characters
-  ✗ activate, release one, re-activate, release other -> should enter and exit smode smoothly without typing characters.
 
 Hammerspoon Console Tips:
   - hs.reload()
@@ -40,7 +39,6 @@ local mappings = {
 -- mean that they've been pressed simultaneously, and therefore we should enter
 -- smode.
 local ACTIVATION_WINDOW = 0.04 -- 40 milliseconds
-local COOLDOWN_TIME = 0.02
 
 ---------------------------------------------------------------
 -- State
@@ -59,7 +57,6 @@ local pendingNonce = 0
 
 -- when smode
 local cooldown = false
-local cooldownNonce = 0
 
 -- used to force a normal key press
 local force = false
@@ -215,10 +212,14 @@ hs.eventtap.new({ eventTypes.keyDown }, function(event)
     return false
   end
 
+  -- any activation key
+  if isActivationKey(char) then
+    keysDown[char] = true
+  end
+
   -- first activation key
   if isActivationKey(char) and not active and not pending then
     -- print('FIRST ACTIVATION KEY')
-    keysDown[char] = true
     pending = true
     pendingKey = char
     pendingModifiers = keys(event:getFlags())
@@ -278,13 +279,6 @@ hs.eventtap.new({ eventTypes.keyDown }, function(event)
     return true
   end
 
-  -- during the cooldown period, ignore all activation keys
-  -- NOTE: must go below ACTIVATE
-  if cooldown and isActivationKey(char) then
-    cooldownNonce = cooldownNonce + 1
-    return true
-  end
-
 end):start()
 
 -- keyUp
@@ -297,32 +291,13 @@ hs.eventtap.new({ eventTypes.keyUp }, function(event)
 
     keysDown[char] = false
 
-    -- resolve
-    if pending then
-      resolvePending(true)
-    end
+    -- if one key is released, just go back to pending
+    pending = true
 
-    -- if either key has been released, reset smode
-    -- disable the use of the activation keys until both keys are release
-    if active then
-      -- print('  active')
+    -- if both keys have been released, re-enable activation keys
+    if not isKeyDown(KEY1) and not isKeyDown(KEY2) then
       active = false
-      cooldown = true
-    end
-
-    -- if both keys have been released, re-enable activation keys after the cooldown
-    if cooldown and not isKeyDown(KEY1) and not isKeyDown(KEY2) then
-      cooldownNonce = cooldownNonce + 1
-      local activationNonce = cooldownNonce
-      -- print('  cooldown release start', cooldownNonce)
-      hs.timer.doAfter(COOLDOWN_TIME, function()
-        if cooldownNonce == activationNonce then
-          -- print('  cooldown release end', cooldownNonce)
-          cooldown = false
-        else
-          -- print('  cooldown nonce old')
-        end
-      end)
+      resolvePending(false)
     end
   end
 
