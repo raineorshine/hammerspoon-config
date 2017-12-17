@@ -22,13 +22,13 @@ Hammerspoon Console Tips:
 local KEY1 = hs.keycodes.map[1] -- the physical 's' key, independent of keyboard layout
 local KEY2 = hs.keycodes.map[2] -- the physical 'r' key, independent of keyboard layout
 
+-- mappings with modifiers must come first
+-- otherwise the modifier-independent mappin will get picked up
 local mappings = {
   { from = 'h', to = 'left' },
   { from = 'n', to = 'down' },
   { from = 'e', to = 'up' },
   { from = 'i', to = 'right' },
-  { from = 'd', to = 'delete', fromMod = {'shift'}, toMod = {'ctrl', 'shift'} },
-  -- must come after since it will pick up any modifier
   { from = 'd', to = 'forwarddelete' }
 }
 
