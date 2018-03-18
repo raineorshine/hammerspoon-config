@@ -9,7 +9,7 @@ Ad hoc testing guidelines:
   x press and hold one activation key, then press and hold the other -> should type characters
   x press gs<enter> within MAX_TIME -> enter gets delayed until after 's'
   ✓ activate, release one, re-activate, release other -> should enter and exit smode smoothly without typing characters.
-  x activation keys not doubled ('12x' does not produce '122x')
+  ✓ activation keys not doubled ('12x' does not produce '122x')
 
 Hammerspoon Console Tips:
   - hs.reload()
@@ -299,15 +299,17 @@ hs.eventtap.new({ eventTypes.keyUp }, function(event)
 
     keysDown[char] = false
 
-    -- if one key is released, just go back to pending (TODO: avoid resuming pending when key has already been foced, e.g. 'rssh')
-    pending = true
-
+    -- if one key is released from smode, go back to pending
+    if active then
+      print('  one key up: resume pending: ' .. pendingKey)
+      pending = true
     -- if both keys have been released, re-enable activation keys
-    if not isKeyDown(KEY1) and not isKeyDown(KEY2) then
-      -- print('  both keys up: exit smode')
-      active = false
+    elseif not isKeyDown(KEY1) and not isKeyDown(KEY2) then
+      print('  both keys up: exit smode')
       resolvePending(false)
     end
+
+    active = false
   end
 
 end):start()
