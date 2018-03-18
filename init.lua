@@ -5,10 +5,11 @@ Simultaneous VI Mode (smode)
 Ad hoc testing guidelines:
   ✓ press activation keys at same time -> should enter smode and enable navigation
   ✓ tap activate keys several times -> should enter and exit smode smoothly
-  ✓ press and hold one activation key, then press and hold the other -> should type characters
   ✓ enter and exit smode and then press single activation key -> should type character
-  ✓ press gs<enter> within MAX_TIME -> enter gets delayed until after 's'
+  x press and hold one activation key, then press and hold the other -> should type characters
+  x press gs<enter> within MAX_TIME -> enter gets delayed until after 's'
   ✓ activate, release one, re-activate, release other -> should enter and exit smode smoothly without typing characters.
+  x activation keys not doubled ('12x' does not produce '122x')
 
 Hammerspoon Console Tips:
   - hs.reload()
@@ -29,12 +30,16 @@ local mappings = {
   { from = 'n', to = 'down' },
   { from = 'e', to = 'up' },
   { from = 'i', to = 'right' },
+  -- WorkFlowy delete item
+  { from = 'd', to = 'delete', fromMod = {'shift'}, toMod = {'ctrl', 'shift'} },
+  -- must come after d + mods since it will pick up any modifier
   { from = 'd', to = 'forwarddelete' }
 }
 
 -- If KEY1 and KEY2 are *both* pressed within this time period, consider this to
 -- mean that they've been pressed simultaneously, and therefore we should enter
 -- smode.
+-- There does not seem to be a clean cutoff to smoothly enter smode WHILE avoiding false positives when typing sequences such as "raineo*rsh*ine"
 local ACTIVATION_WINDOW = 0.04 -- 40 milliseconds
 
 ---------------------------------------------------------------
@@ -195,11 +200,10 @@ hs.eventtap.new({ eventTypes.keyDown }, function(event)
   if char == ' ' then
     char = 'space'
   end
-  -- print('--' .. char .. '--')
 
   -- allow key presses to be forced through
   if force then
-    -- print('force')
+    -- print('--' .. char .. '-- (forced)')
     force = false
     return false
   end
@@ -213,6 +217,8 @@ hs.eventtap.new({ eventTypes.keyDown }, function(event)
   ---------------------------------------------------------------
   -- Suppress and modify cases
   ---------------------------------------------------------------
+
+  -- print('--' .. char .. '--')
 
   -- first activation key
   if isAct and not active and not pending then
@@ -275,6 +281,7 @@ hs.eventtap.new({ eventTypes.keyDown }, function(event)
 
   -- all code paths above suppress the key press
   -- except for the explicit return false in the else case
+  -- print('suppressed')
   return true
 
 end):start()
@@ -288,11 +295,11 @@ hs.eventtap.new({ eventTypes.keyUp }, function(event)
   local char = event:getCharacters(true):lower()
 
   if isActivationKey(char) then
-    -- print('activation key up: resume pending', char)
+    -- print('activation key up: ' .. char  .. ', resume pending: ' .. pendingKey)
 
     keysDown[char] = false
 
-    -- if one key is released, just go back to pending
+    -- if one key is released, just go back to pending (TODO: avoid resuming pending when key has already been foced, e.g. 'rssh')
     pending = true
 
     -- if both keys have been released, re-enable activation keys
