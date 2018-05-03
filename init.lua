@@ -1,3 +1,4 @@
+local application = require "hs.application"
 
 ---------------------------------------------------------------
 -- Constants
@@ -172,7 +173,7 @@ end
 -- KeyDown
 ---------------------------------------------------------------
 
-hs.eventtap.new({ eventTypes.keyDown }, function(event)
+smodeKeyDownListener = hs.eventtap.new({ eventTypes.keyDown }, function(event)
 
   ---------------------------------------------------------------
   -- Setup
@@ -273,7 +274,7 @@ end):start()
 -- KeyUp
 ---------------------------------------------------------------
 
-hs.eventtap.new({ eventTypes.keyUp }, function(event)
+smodeKeyUpListener = hs.eventtap.new({ eventTypes.keyUp }, function(event)
 
   local char = event:getCharacters(true):lower()
 
@@ -284,11 +285,11 @@ hs.eventtap.new({ eventTypes.keyUp }, function(event)
 
     -- if one key is released from smode, go back to pending
     if active then
-      print('  one key up: resume pending: ' .. pendingKey)
+      -- print('  one key up: resume pending: ' .. pendingKey)
       pending = true
     -- if both keys have been released, re-enable activation keys
     elseif not isKeyDown(KEY1) and not isKeyDown(KEY2) then
-      print('  both keys up: exit smode')
+      -- print('  both keys up: exit smode')
       resolvePending(false)
     end
 
@@ -303,6 +304,6 @@ end):start()
 
 -- keyDown
 -- (duplicate event handlers handled in LIFO order)
-hs.eventtap.new({ eventTypes.keyDown }, function(event)
+smodeKeyDownListener2 = hs.eventtap.new({ eventTypes.keyDown }, function(event)
   return active and sendMappedKeyDown(event:getCharacters(true):lower(), keys(event:getFlags()))
 end):start()
